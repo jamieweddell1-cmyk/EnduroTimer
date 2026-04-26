@@ -537,6 +537,16 @@ if ('serviceWorker' in navigator) {
 const FB_CFG_KEY = 'et_firebase_cfg';
 let db = null;
 
+const firebaseConfig = {
+  apiKey: "AIzaSyAvVvCexJhn8Y7yk6jLEO7uVp-CPkvVWFY",
+  authDomain: "racetimer-c4693.firebaseapp.com",
+  databaseURL: "https://racetimer-c4693-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "racetimer-c4693",
+  storageBucket: "racetimer-c4693.firebasestorage.app",
+  messagingSenderId: "733047674435",
+  appId: "1:733047674435:web:2981a4d2eb009ef9bca6f6"
+};
+  
 function doInitFirebase() {
   const raw = document.getElementById('cfg-input').value.trim();
   try {
@@ -566,8 +576,12 @@ function resetFirebase() {
 window.addEventListener('load', () => {
   const saved = localStorage.getItem(FB_CFG_KEY);
   if (saved) {
-    try { document.getElementById('cfg-input').value = saved; bootFirebase(JSON.parse(saved)); }
-    catch(e) { /* show config screen */ }
+    try { document.getElementById('cfg-input').value = saved; bootFirebase(JSON.parse(saved)); return; }
+    catch(e) {}
+  }
+  // Fall back to embedded config if no saved config
+  if (EMBEDDED_CONFIG.databaseURL) {
+    bootFirebase(EMBEDDED_CONFIG);
   }
 });
 
