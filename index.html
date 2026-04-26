@@ -531,10 +531,9 @@ if ('serviceWorker' in navigator) {
 }
 
 // ── Firebase bootstrap ───────────────────
-const FB_CFG_KEY = 'et_firebase_cfg';
 let db = null;
 
-const firebaseConfig = {
+const EMBEDDED_CONFIG = {
   apiKey: "AIzaSyAvVvCexJhn8Y7yk6jLEO7uVp-CPkvVWFY",
   authDomain: "racetimer-c4693.firebaseapp.com",
   databaseURL: "https://racetimer-c4693-default-rtdb.europe-west1.firebasedatabase.app",
@@ -543,43 +542,60 @@ const firebaseConfig = {
   messagingSenderId: "733047674435",
   appId: "1:733047674435:web:2981a4d2eb009ef9bca6f6"
 };
-  
+
 function doInitFirebase() {
   const raw = document.getElementById('cfg-input').value.trim();
+
   try {
     const cfg = JSON.parse(raw);
-    if (!cfg.databaseURL) throw new Error('databaseURL is missing');
-    localStorage.setItem(FB_CFG_KEY, raw);
+
+    if (!cfg.databaseURL) {
+      throw new Error('databaseURL is missing');
+    }
+
+    // Use entered config for this session only (NOT saved locally)
     bootFirebase(cfg);
-  } catch(e) { alert('Invalid config:\n' + e.message); }
+
+  } catch (e) {
+    alert('Invalid config:\n' + e.message);
+  }
 }
 
 function bootFirebase(cfg) {
   try {
-    if (firebase.apps.length) firebase.apps.forEach(a => a.delete());
+    // Remove any existing Firebase apps first
+    if (firebase.apps.length) {
+      firebase.apps.forEach(app => app.delete());
+    }
+
     firebase.initializeApp(cfg);
     db = firebase.database();
-    db.ref('.info/connected').on('value', s => setOnline(s.val() === true));
+
+    db.ref('.info/connected').on('value', snapshot => {
+      setOnline(snapshot.val() === true);
+    });
+
     showScreen('screen-join');
     checkURLParams();
-  } catch(e) { alert('Firebase error:\n' + e.message); }
+
+  } catch (e) {
+    alert('Firebase error:\n' + e.message);
+  }
 }
 
 function resetFirebase() {
-  localStorage.removeItem(FB_CFG_KEY);
+  // No local config to clear anymore — just reload
   location.reload();
 }
 
 window.addEventListener('load', () => {
-  const saved = localStorage.getItem(FB_CFG_KEY);
-  if (saved) {
-    try { document.getElementById('cfg-input').value = saved; bootFirebase(JSON.parse(saved)); return; }
-    catch(e) {}
-  }
-  // Fall back to embedded config if no saved config
+  // ALWAYS use embedded config only
   if (EMBEDDED_CONFIG.databaseURL) {
     bootFirebase(EMBEDDED_CONFIG);
+    return;
   }
+
+  alert('No embedded Firebase config found.');
 });
 
 // ── App state ────────────────────────────
