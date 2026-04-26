@@ -1,0 +1,1798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>RaceTimer</title>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=DM+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #070708;
+  --surface: #111114;
+  --surface-2: #18181c;
+  --surface-3: #222228;
+  --border: #2a2a32;
+  --accent: #f0b429;
+  --accent-dim: rgba(240,180,41,0.12);
+  --danger: #f04040;
+  --danger-dim: rgba(240,64,64,0.12);
+  --success: #2dd17a;
+  --success-dim: rgba(45,209,122,0.12);
+  --info: #4eb3f8;
+  --text: #eeeef0;
+  --text-2: #9090a0;
+  --text-3: #505060;
+  --mono: 'DM Mono', 'Courier New', monospace;
+  --display: 'Barlow Condensed', 'Arial Narrow', Arial, sans-serif;
+  --radius: 14px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  height: 100%; width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--display);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── SCREENS ── */
+.screen {
+  display: none;
+  position: fixed;
+  inset: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+.screen.active { display: flex; }
+
+/* ── FLASH OVERLAY ── */
+.flash {
+  position: fixed; inset: 0;
+  pointer-events: none; opacity: 0;
+  transition: opacity 0.35s ease;
+  z-index: 900;
+}
+.flash.green { background: rgba(45,209,122,0.22); }
+.flash.red   { background: rgba(240,64,64,0.22); }
+.flash.show  { opacity: 1; }
+
+/* ── TOAST ── */
+.toast {
+  position: fixed;
+  bottom: 28px; left: 50%;
+  transform: translateX(-50%) translateY(90px);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 13px 22px;
+  border-radius: 40px;
+  font-family: var(--mono);
+  font-size: 13px;
+  z-index: 999;
+  transition: transform 0.32s cubic-bezier(0.34,1.56,0.64,1);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.toast.show { transform: translateX(-50%) translateY(0); }
+
+/* ── OFFLINE BANNER ── */
+.offline-banner {
+  display: none;
+  background: var(--accent);
+  color: #000;
+  text-align: center;
+  padding: 7px 16px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.offline-banner.show { display: block; }
+
+/* ── TOP BAR ── */
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 8px;
+}
+.top-bar-left { flex: 1; min-width: 0; }
+.stage-label {
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--text-3);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.event-label {
+  font-size: 20px;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.1;
+}
+.top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.status-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 10px 4px 8px;
+}
+.status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  flex-shrink: 0;
+}
+.status-dot.offline {
+  background: var(--accent);
+  animation: blink 1s infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+.icon-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 18px;
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.icon-btn:active { background: var(--surface-3); }
+
+/* ── TYPOGRAPHY & FORMS ── */
+label {
+  display: block;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-3);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 7px;
+}
+
+input[type="text"],
+input[type="number"],
+input[type="url"],
+textarea {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 16px;
+  padding: 13px 15px;
+  outline: none;
+  transition: border-color 0.18s;
+  -webkit-appearance: none;
+  appearance: none;
+}
+input:focus, textarea:focus { border-color: var(--accent); }
+input::placeholder, textarea::placeholder { color: var(--text-3); }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+.bib-xl {
+  font-size: 52px !important;
+  font-weight: 800 !important;
+  text-align: center !important;
+  letter-spacing: 6px;
+  padding: 18px !important;
+  border-width: 2px !important;
+  color: var(--accent) !important;
+}
+
+/* ── BUTTONS ── */
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 15px 20px;
+  border-radius: var(--radius);
+  border: 1.5px solid transparent;
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: transform 0.08s, opacity 0.15s;
+  -webkit-user-select: none; user-select: none;
+}
+.btn:active { transform: scale(0.96); }
+.btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none !important; }
+
+.btn-primary  { background: var(--accent); color: #000; }
+.btn-danger   { background: var(--danger); color: #fff; }
+.btn-success  { background: var(--success); color: #000; }
+.btn-ghost    { background: transparent; color: var(--text-2); border-color: var(--border); }
+.btn-surface  { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+
+/* Big action buttons */
+.action-btn {
+  width: 100%;
+  max-width: 340px;
+  height: 130px;
+  border-radius: 24px;
+  font-size: 46px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.08s, box-shadow 0.1s;
+  -webkit-user-select: none; user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.action-btn:active { transform: scale(0.93); }
+
+.btn-go   { background: var(--success); color: #000; box-shadow: 0 6px 40px rgba(45,209,122,0.28); }
+.btn-stop { background: var(--danger);  color: #fff; box-shadow: 0 6px 40px rgba(240,64,64,0.28); }
+.btn-go:active   { box-shadow: 0 2px 10px rgba(45,209,122,0.15); }
+.btn-stop:active { box-shadow: 0 2px 10px rgba(240,64,64,0.15); }
+
+/* ── CONFIG / JOIN SCREENS ── */
+#screen-config, #screen-join {
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 28px 24px;
+  width: 100%;
+  max-width: 390px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.logo-mark {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-3);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+.logo-word {
+  font-size: 54px;
+  font-weight: 900;
+  letter-spacing: -1px;
+  line-height: 1;
+}
+.logo-word span { color: var(--accent); }
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-3);
+  font-size: 11px;
+  font-family: var(--mono);
+  letter-spacing: 0.1em;
+}
+.divider::before, .divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--border);
+}
+
+/* ── ROLE SCREEN ── */
+#screen-role {
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.session-hero {
+  text-align: center;
+  margin-bottom: 4px;
+}
+.session-hero-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-3);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+.session-hero-code {
+  font-size: 56px;
+  font-weight: 900;
+  letter-spacing: 10px;
+  color: var(--accent);
+  line-height: 1;
+}
+.session-hero-event {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-top: 2px;
+}
+
+.role-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 390px;
+}
+
+.role-card {
+  display: flex;
+  align-items: center;
+  padding: 18px 20px;
+  gap: 16px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 16px;
+  cursor: pointer;
+  transition: border-color 0.18s, transform 0.08s;
+}
+.role-card:active { transform: scale(0.98); }
+.role-card:hover  { border-color: var(--accent); }
+
+.role-icon { font-size: 30px; flex-shrink: 0; }
+.role-title { font-size: 21px; font-weight: 700; display: block; line-height: 1; margin-bottom: 3px; }
+.role-sub   { font-size: 12px; font-family: var(--mono); color: var(--text-2); }
+
+/* ── START SCREEN ── */
+#screen-start { display: none; }
+#screen-start.active { display: flex; }
+
+.timing-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 20px;
+  gap: 18px;
+  overflow: hidden;
+}
+
+.athlete-preview {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--success);
+  text-align: center;
+  min-height: 26px;
+  letter-spacing: 0.02em;
+}
+
+.last-action-label {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-3);
+  text-align: center;
+}
+
+/* ── FINISH SCREEN ── */
+#screen-finish { display: none; }
+#screen-finish.active { display: flex; }
+
+.finish-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  gap: 12px;
+}
+
+.unassigned-count {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+/* ── QUEUE TRAY ── */
+.queue-tray {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 14px 16px 20px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  max-height: 48vh;
+}
+
+.queue-tray-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.queue-tray-title {
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--text-3);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.queue-badge {
+  background: var(--danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-family: var(--mono);
+}
+
+.queue-empty-msg {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text-3);
+  text-align: center;
+  padding: 8px 0;
+}
+
+.queue-nav {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.nav-arrow {
+  background: var(--surface-2);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-2);
+  font-size: 22px;
+  width: 46px;
+  flex-shrink: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.nav-arrow:disabled { opacity: 0.25; cursor: not-allowed; }
+.nav-arrow:active:not(:disabled) { background: var(--surface-3); }
+
+.queue-entry-card {
+  flex: 1;
+  background: var(--surface-2);
+  border: 1.5px solid var(--accent);
+  border-radius: 10px;
+  padding: 10px 14px;
+  text-align: center;
+}
+.queue-entry-time {
+  font-family: var(--mono);
+  font-size: 19px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1;
+}
+.queue-entry-time.device-time { color: var(--accent); }
+.queue-entry-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 3px;
+}
+
+.assign-row {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+.assign-bib {
+  width: 110px !important;
+  flex-shrink: 0;
+  text-align: center !important;
+  font-size: 24px !important;
+  font-weight: 700 !important;
+  letter-spacing: 3px;
+  padding: 12px 10px !important;
+  color: var(--accent) !important;
+}
+
+.assign-preview {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--success);
+  margin-top: 8px;
+  min-height: 20px;
+  font-family: var(--mono);
+}
+
+/* ── RESULTS SCREEN ── */
+#screen-results { display: none; }
+#screen-results.active { display: flex; }
+
+.tabs-bar {
+  display: flex;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  flex-shrink: 0;
+  scrollbar-width: none;
+}
+.tabs-bar::-webkit-scrollbar { display: none; }
+
+.tab-btn {
+  padding: 11px 17px;
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-3);
+  background: none;
+  border: none;
+  border-bottom: 2.5px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.results-scroll { flex: 1; overflow-y: auto; }
+
+.results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.results-table th {
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 9px 12px;
+  text-align: left;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  white-space: nowrap;
+}
+.results-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.results-table tr:last-child td { border-bottom: none; }
+.results-table tr:nth-child(even) td { background: rgba(255,255,255,0.015); }
+
+.td-rank  { color: var(--text-3); font-size: 11px; width: 28px; }
+.td-bib   { color: var(--accent); font-weight: 500; width: 44px; }
+.td-name  { color: var(--text); }
+.td-time  { text-align: right; color: var(--text); white-space: nowrap; }
+.td-best  { text-align: right; color: var(--accent); font-weight: 500; white-space: nowrap; }
+.td-warn  { color: var(--accent); }
+.td-danger{ color: var(--danger); }
+.td-muted { color: var(--text-3); }
+
+.no-data {
+  text-align: center;
+  padding: 48px 20px;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--text-3);
+  line-height: 1.6;
+}
+
+/* ── ADMIN DRAWER ── */
+#admin-panel {
+  position: fixed; inset: 0;
+  z-index: 200;
+  display: none;
+}
+#admin-panel.open { display: flex; }
+
+.admin-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(2px);
+}
+.admin-drawer {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: min(420px, 100%);
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 1;
+}
+.admin-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.admin-head h2 { font-size: 22px; font-weight: 800; }
+.admin-body { flex: 1; overflow-y: auto; }
+
+.admin-section {
+  border-bottom: 1px solid var(--border);
+  padding: 18px 20px;
+}
+.admin-section-title {
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--text-3);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+.add-row {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+}
+.add-row input { flex: 1; }
+
+.stage-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 13px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  margin-bottom: 8px;
+}
+.stage-item.is-active {
+  border-color: var(--success);
+  background: var(--success-dim);
+}
+.stage-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+  flex-shrink: 0;
+}
+.stage-dot.on { background: var(--success); }
+.stage-item-name {
+  flex: 1;
+  font-size: 16px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.active-badge {
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--success);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.xs-btn {
+  background: var(--surface-3);
+  border: none;
+  color: var(--text-2);
+  font-size: 12px;
+  font-family: var(--display);
+  font-weight: 600;
+  padding: 6px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.xs-btn:hover { background: var(--border); }
+.xs-btn.ok    { color: var(--success); }
+.xs-btn.del   { color: var(--danger); }
+
+.athlete-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.athlete-row:last-child { border-bottom: none; }
+.ath-bib { color: var(--accent); margin-right: 10px; min-width: 28px; }
+
+.share-url {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 10px 12px;
+  word-break: break-all;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+#qr-wrap {
+  background: #fff;
+  padding: 10px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.hint {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+/* ── SMALL UTILITIES ── */
+.mt-6  { margin-top: 6px; }
+.mt-10 { margin-top: 10px; }
+.mt-14 { margin-top: 14px; }
+.w-full { width: 100%; }
+.text-center { text-align: center; }
+
+@media (max-height: 640px) {
+  .action-btn { height: 100px; font-size: 38px; }
+  .timing-body { gap: 12px; }
+}
+@media (max-height: 520px) {
+  .action-btn { height: 80px; font-size: 30px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Overlays -->
+<div class="flash green" id="fl-green"></div>
+<div class="flash red"   id="fl-red"></div>
+<div class="toast"       id="toast"></div>
+
+<!-- ══════════════════════════════════════════
+     CONFIG SCREEN
+════════════════════════════════════════════ -->
+<div class="screen active" id="screen-config">
+  <div class="card" style="margin:auto;">
+    <div>
+      <div class="logo-mark">Race Timing System</div>
+      <div class="logo-word">RACE<span>TIMER</span></div>
+    </div>
+    <p style="font-family:var(--mono);font-size:13px;color:var(--text-2);line-height:1.6;">
+      Paste your Firebase config JSON below to connect.<br>
+      See setup instructions for help.
+    </p>
+    <div>
+      <label>Firebase Config (JSON)</label>
+      <textarea id="cfg-input" rows="6" placeholder='{"apiKey":"…","authDomain":"…","databaseURL":"…","projectId":"…","storageBucket":"…","messagingSenderId":"…","appId":"…"}'></textarea>
+    </div>
+    <button class="btn btn-primary w-full" onclick="doInitFirebase()">Connect to Firebase</button>
+    <div class="hint">Once connected, this config is saved locally and you won't need to paste it again.</div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     JOIN / CREATE SCREEN
+════════════════════════════════════════════ -->
+<div class="screen" id="screen-join">
+  <div style="flex:1;overflow-y:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:16px;">
+    <div style="text-align:center;margin-bottom:4px;">
+      <div class="logo-mark">Race Timing System</div>
+      <div class="logo-word">RACE<span>TIMER</span></div>
+    </div>
+
+    <div class="card">
+      <div style="font-size:10px;font-family:var(--mono);color:var(--text-3);letter-spacing:0.18em;text-transform:uppercase;">Start a New Session</div>
+      <div>
+        <label>Event Name</label>
+        <input type="text" id="new-event-name" placeholder="e.g. Summer Enduro 2026">
+      </div>
+      <div>
+        <label>Stages (comma separated, optional)</label>
+        <input type="text" id="new-stages" placeholder="e.g. Stage 1, Stage 2, Stage 3">
+      </div>
+      <button class="btn btn-primary w-full" onclick="createSession()">Create Session</button>
+    </div>
+
+    <div class="divider" style="width:100%;max-width:390px;">OR JOIN EXISTING</div>
+
+    <div class="card">
+      <div>
+        <label>Session Code</label>
+        <input type="text" id="join-code" maxlength="4" placeholder="RX49"
+          style="text-align:center;font-size:32px;font-weight:800;letter-spacing:8px;text-transform:uppercase;"
+          oninput="this.value=this.value.toUpperCase()">
+      </div>
+      <button class="btn btn-surface w-full" onclick="joinSession()">Join Session</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     ROLE SCREEN
+════════════════════════════════════════════ -->
+<div class="screen" id="screen-role">
+  <div style="flex:1;overflow-y:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:20px;">
+    <div class="session-hero">
+      <div class="session-hero-label">Session Code</div>
+      <div class="session-hero-code" id="role-code">——</div>
+      <div class="session-hero-event" id="role-event">Event</div>
+    </div>
+
+    <div class="role-list">
+      <div class="role-card" onclick="selectRole('start')">
+        <div class="role-icon">🏁</div>
+        <div>
+          <span class="role-title">Start Official</span>
+          <span class="role-sub">Record athlete departures</span>
+        </div>
+      </div>
+      <div class="role-card" onclick="selectRole('finish')">
+        <div class="role-icon">⏱</div>
+        <div>
+          <span class="role-title">Finish Official</span>
+          <span class="role-sub">Record athlete arrivals</span>
+        </div>
+      </div>
+      <div class="role-card" onclick="selectRole('viewer')">
+        <div class="role-icon">📊</div>
+        <div>
+          <span class="role-title">View Results</span>
+          <span class="role-sub">Live results — read only</span>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-ghost w-full" style="max-width:390px;" onclick="showScreen('screen-join')">← Back</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     START SCREEN
+════════════════════════════════════════════ -->
+<div class="screen" id="screen-start">
+  <div class="top-bar">
+    <div class="top-bar-left">
+      <div class="stage-label" id="start-stage-lbl">NO ACTIVE STAGE</div>
+      <div class="event-label" id="start-event-lbl">RaceTimer</div>
+    </div>
+    <div class="top-bar-right">
+      <div class="status-pill">
+        <div class="status-dot" id="start-dot"></div>
+        <span id="start-status-txt">Live</span>
+      </div>
+      <button class="icon-btn" onclick="openAdmin()" title="Admin">⚙️</button>
+    </div>
+  </div>
+  <div class="offline-banner" id="start-banner">📡 OFFLINE — USING DEVICE TIME</div>
+
+  <div class="timing-body">
+    <div>
+      <label style="text-align:center;">BIB NUMBER</label>
+      <input type="number" id="start-bib" class="bib-xl" placeholder="—" min="1" max="999"
+        style="width:220px;" oninput="previewAthlete('start-bib','start-preview')">
+    </div>
+    <div class="athlete-preview" id="start-preview"></div>
+    <button class="action-btn btn-go" onclick="recordStart()">START</button>
+    <div class="last-action-label" id="start-last">—</div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     FINISH SCREEN
+════════════════════════════════════════════ -->
+<div class="screen" id="screen-finish">
+  <div class="top-bar">
+    <div class="top-bar-left">
+      <div class="stage-label" id="finish-stage-lbl">NO ACTIVE STAGE</div>
+      <div class="event-label" id="finish-event-lbl">RaceTimer</div>
+    </div>
+    <div class="top-bar-right">
+      <div class="status-pill">
+        <div class="status-dot" id="finish-dot"></div>
+        <span id="finish-status-txt">Live</span>
+      </div>
+    </div>
+  </div>
+  <div class="offline-banner" id="finish-banner">📡 OFFLINE — USING DEVICE TIME</div>
+
+  <div class="finish-body">
+    <button class="action-btn btn-stop" onclick="recordFinish()">FINISH</button>
+    <div class="unassigned-count" id="finish-ua-count">0 unassigned</div>
+  </div>
+
+  <div class="queue-tray" id="queue-tray">
+    <div class="queue-tray-header">
+      <span class="queue-tray-title">Unassigned Finishes</span>
+      <span class="queue-badge" id="queue-badge">0</span>
+    </div>
+    <div class="queue-empty-msg" id="queue-empty">No unassigned finishes — press FINISH when an athlete crosses the line</div>
+    <div id="queue-controls" style="display:none;">
+      <div class="queue-nav">
+        <button class="nav-arrow" id="q-prev" onclick="qNav(-1)">‹</button>
+        <div class="queue-entry-card">
+          <div class="queue-entry-time" id="q-time">--:--:--.---</div>
+          <div class="queue-entry-meta" id="q-meta">entry 1 of 1</div>
+        </div>
+        <button class="nav-arrow" id="q-next" onclick="qNav(1)">›</button>
+      </div>
+      <div class="assign-row">
+        <input type="number" id="finish-bib" class="assign-bib" placeholder="BIB" min="1" max="999"
+          oninput="previewAthlete('finish-bib','finish-preview')">
+        <button class="btn btn-primary" style="flex:1;font-size:15px;padding:12px 14px;" onclick="assignFinish()">ASSIGN ↵</button>
+      </div>
+      <div class="assign-preview" id="finish-preview"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     RESULTS SCREEN
+════════════════════════════════════════════ -->
+<div class="screen" id="screen-results">
+  <div class="top-bar">
+    <div class="top-bar-left">
+      <div class="stage-label" id="res-session-lbl">SESSION —</div>
+      <div class="event-label" id="res-event-lbl">RaceTimer</div>
+    </div>
+    <div class="top-bar-right">
+      <div class="status-pill">
+        <div class="status-dot" id="res-dot"></div>
+        <span id="res-status-txt">Live</span>
+      </div>
+    </div>
+  </div>
+  <div class="offline-banner" id="res-banner">📡 OFFLINE — DATA MAY BE STALE</div>
+  <div class="tabs-bar" id="res-tabs"></div>
+  <div class="results-scroll" id="res-body"><div class="no-data">Loading results…</div></div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     ADMIN PANEL
+════════════════════════════════════════════ -->
+<div id="admin-panel">
+  <div class="admin-backdrop" onclick="closeAdmin()"></div>
+  <div class="admin-drawer">
+    <div class="admin-head">
+      <h2>⚙️ Admin</h2>
+      <button class="icon-btn" onclick="closeAdmin()">✕</button>
+    </div>
+    <div class="admin-body">
+
+      <!-- Event name -->
+      <div class="admin-section">
+        <div class="admin-section-title">Event Name</div>
+        <div class="add-row">
+          <input type="text" id="adm-event" placeholder="Event name">
+          <button class="btn btn-primary" style="padding:13px 16px;font-size:15px;flex-shrink:0;" onclick="saveEventName()">Save</button>
+        </div>
+      </div>
+
+      <!-- Stages -->
+      <div class="admin-section">
+        <div class="admin-section-title">Stages</div>
+        <div id="adm-stages"></div>
+        <div class="add-row mt-6">
+          <input type="text" id="adm-new-stage" placeholder="New stage name">
+          <button class="btn btn-surface" style="padding:13px 14px;font-size:15px;flex-shrink:0;" onclick="addStage()">Add</button>
+        </div>
+      </div>
+
+      <!-- Roster -->
+      <div class="admin-section">
+        <div class="admin-section-title">Athlete Roster</div>
+
+        <label>Google Sheets CSV Import</label>
+        <div class="add-row">
+          <input type="url" id="adm-sheets-url" placeholder="Paste published CSV URL">
+          <button class="btn btn-surface" style="padding:13px 14px;font-size:15px;flex-shrink:0;" onclick="importSheets()">Import</button>
+        </div>
+        <div class="hint mt-6">In Google Sheets: File → Share → Publish to web → select CSV → copy link. Sheet must have Bib in column A, Name in column B (with a header row).</div>
+
+        <div style="margin-top:16px;">
+          <label>Add Athlete Manually</label>
+          <div class="add-row">
+            <input type="number" id="adm-new-bib" placeholder="Bib" min="1" max="999" style="width:80px;flex:none;">
+            <input type="text"   id="adm-new-name" placeholder="Athlete name">
+            <button class="btn btn-surface" style="padding:13px 14px;font-size:15px;flex-shrink:0;" onclick="addAthlete()">Add</button>
+          </div>
+        </div>
+
+        <div id="adm-roster" style="margin-top:12px;max-height:200px;overflow-y:auto;"></div>
+      </div>
+
+      <!-- Share -->
+      <div class="admin-section">
+        <div class="admin-section-title">Share with Athletes</div>
+        <div id="qr-wrap"><div id="qr-inner"></div></div>
+        <div class="share-url" id="share-url-display">—</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-surface" style="flex:1;font-size:15px;padding:12px;" onclick="copyLink()">📋 Copy Link</button>
+          <button class="btn btn-primary" style="flex:1;font-size:15px;padding:12px;" onclick="shareWA()">📱 WhatsApp</button>
+        </div>
+      </div>
+
+      <!-- Session info -->
+      <div class="admin-section">
+        <div class="admin-section-title">Session</div>
+        <div class="hint" style="margin-bottom:12px;">Code: <span id="adm-code" style="color:var(--accent);font-size:15px;font-family:var(--mono);"></span></div>
+        <button class="btn btn-ghost w-full" onclick="leaveSession()">Leave Session</button>
+        <button class="btn btn-ghost w-full mt-6" onclick="resetFirebase()">Disconnect Firebase</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     APP LOGIC
+════════════════════════════════════════════ -->
+<script>
+'use strict';
+
+// ── Firebase bootstrap ───────────────────────
+const FB_CFG_KEY  = 'rt_firebase_cfg';
+const SESS_KEY    = 'rt_last_session';
+let   db          = null;
+
+function doInitFirebase() {
+  const raw = document.getElementById('cfg-input').value.trim();
+  try {
+    const cfg = JSON.parse(raw);
+    if (!cfg.databaseURL) throw new Error('databaseURL is missing');
+    localStorage.setItem(FB_CFG_KEY, raw);
+    bootFirebase(cfg);
+  } catch(e) {
+    alert('Invalid config:\n' + e.message);
+  }
+}
+
+function bootFirebase(cfg) {
+  try {
+    if (firebase.apps.length) firebase.apps.forEach(a => a.delete());
+    firebase.initializeApp(cfg);
+    db = firebase.database();
+    db.ref('.info/connected').on('value', s => setOnline(s.val() === true));
+    showScreen('screen-join');
+    checkURLParams();
+  } catch(e) {
+    alert('Firebase error:\n' + e.message);
+  }
+}
+
+function resetFirebase() {
+  localStorage.removeItem(FB_CFG_KEY);
+  location.reload();
+}
+
+window.addEventListener('load', () => {
+  const saved = localStorage.getItem(FB_CFG_KEY);
+  if (saved) {
+    try { document.getElementById('cfg-input').value = saved; bootFirebase(JSON.parse(saved)); }
+    catch(e) { /* show config screen */ }
+  }
+});
+
+// ── App state ───────────────────────────────
+const S = {
+  sessionCode : null,
+  eventName   : '',
+  role        : null,
+  stages      : {},    // { id: {name,order} }
+  activeStage : null,  // id
+  roster      : {},    // { bib: {name,bib} }
+  isOnline    : true,
+  timingData  : {},    // { stageId: {starts:{}, finishes:{}} }
+  finishQueue : [],    // [{id,deviceTime,serverTime,wasOffline}]
+  qIdx        : 0,
+  listeners   : []
+};
+
+// ── Screens ─────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function checkURLParams() {
+  const p = new URLSearchParams(window.location.search);
+  const s = p.get('session'), r = p.get('role');
+  if (s && r === 'viewer') joinByCode(s.toUpperCase(), 'viewer');
+}
+
+// ── Online status ────────────────────────────
+function setOnline(online) {
+  S.isOnline = online;
+  ['start-dot','finish-dot','res-dot'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('offline', !online);
+  });
+  ['start-status-txt','finish-status-txt','res-status-txt'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = online ? 'Live' : 'Offline';
+  });
+  ['start-banner','finish-banner','res-banner'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('show', !online);
+  });
+}
+
+// ── Session helpers ──────────────────────────
+function genCode() {
+  const c = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  return Array.from({length:4}, () => c[Math.floor(Math.random()*c.length)]).join('');
+}
+
+function detach() {
+  S.listeners.forEach(({ref,ev,fn}) => ref.off(ev,fn));
+  S.listeners = [];
+}
+
+function listen(ref, ev, fn) {
+  ref.on(ev, fn);
+  S.listeners.push({ref,ev,fn});
+}
+
+async function createSession() {
+  const eventName = document.getElementById('new-event-name').value.trim() || 'Race Event';
+  const stagesRaw = document.getElementById('new-stages').value.trim();
+  const code = genCode();
+
+  const stagesObj = {};
+  if (stagesRaw) {
+    stagesRaw.split(',').forEach((name, i) => {
+      const key = db.ref('x').push().key;
+      stagesObj[key] = { name: name.trim(), order: i };
+    });
+  }
+
+  await db.ref(`sessions/${code}`).set({
+    meta: { eventName, createdAt: firebase.database.ServerValue.TIMESTAMP, activeStageId: null },
+    stages: Object.keys(stagesObj).length ? stagesObj : null
+  });
+
+  S.sessionCode = code;
+  S.eventName   = eventName;
+  localStorage.setItem(SESS_KEY, code);
+  showRoleScreen();
+}
+
+async function joinSession() {
+  const code = document.getElementById('join-code').value.trim().toUpperCase();
+  if (code.length !== 4) { toast('Enter a 4-character code'); return; }
+  await joinByCode(code);
+}
+
+async function joinByCode(code, autoRole=null) {
+  const snap = await db.ref(`sessions/${code}/meta`).once('value');
+  if (!snap.exists()) { toast('Session not found — check your code'); return; }
+  const meta = snap.val();
+  S.sessionCode = code;
+  S.eventName   = meta.eventName || 'Race Event';
+  if (autoRole) selectRole(autoRole);
+  else showRoleScreen();
+}
+
+function showRoleScreen() {
+  document.getElementById('role-code').textContent  = S.sessionCode;
+  document.getElementById('role-event').textContent = S.eventName;
+  showScreen('screen-role');
+}
+
+function selectRole(role) {
+  S.role = role;
+  detach();
+  S.timingData = {}; S.finishQueue = []; S.qIdx = 0;
+
+  // Start shared listeners
+  listenMeta();
+  listenRoster();
+  listenTiming();
+
+  if (role === 'start') {
+    document.getElementById('start-event-lbl').textContent = S.eventName;
+    document.getElementById('start-bib').value = '';
+    showScreen('screen-start');
+    setTimeout(() => document.getElementById('start-bib').focus(), 200);
+  } else if (role === 'finish') {
+    document.getElementById('finish-event-lbl').textContent = S.eventName;
+    showScreen('screen-finish');
+    renderQueue();
+  } else {
+    document.getElementById('res-session-lbl').textContent = `SESSION ${S.sessionCode}`;
+    document.getElementById('res-event-lbl').textContent   = S.eventName;
+    showScreen('screen-results');
+    renderResults();
+  }
+}
+
+function leaveSession() {
+  detach();
+  Object.assign(S, {
+    sessionCode:null, eventName:'', role:null, stages:{}, activeStage:null,
+    roster:{}, timingData:{}, finishQueue:[], qIdx:0, listeners:[]
+  });
+  closeAdmin();
+  showScreen('screen-join');
+}
+
+// ── Realtime listeners ───────────────────────
+function listenMeta() {
+  listen(db.ref(`sessions/${S.sessionCode}/meta`), 'value', snap => {
+    const m = snap.val() || {};
+    S.eventName   = m.eventName || 'RaceTimer';
+    S.activeStage = m.activeStageId || null;
+
+    // Update labels
+    ['start-event-lbl','finish-event-lbl','res-event-lbl'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = S.eventName;
+    });
+    document.getElementById('adm-event').value = S.eventName;
+    updateStageLabels();
+    renderAdminStages();
+  });
+
+  listen(db.ref(`sessions/${S.sessionCode}/stages`), 'value', snap => {
+    S.stages = snap.val() || {};
+    updateStageLabels();
+    renderAdminStages();
+    renderResultsTabs();
+    renderResults();
+  });
+}
+
+function listenRoster() {
+  listen(db.ref(`sessions/${S.sessionCode}/roster`), 'value', snap => {
+    S.roster = snap.val() || {};
+    renderAdminRoster();
+  });
+}
+
+function listenTiming() {
+  listen(db.ref(`sessions/${S.sessionCode}/timing`), 'value', snap => {
+    const raw = snap.val() || {};
+    S.timingData = {};
+    Object.entries(raw).forEach(([sid, sd]) => {
+      S.timingData[sid] = {
+        starts:   sd.starts   || {},
+        finishes: sd.finishes || {}
+      };
+    });
+    // Rebuild finish queue for active stage
+    rebuildQueue();
+    renderQueue();
+    renderResults();
+  });
+}
+
+// ── Stage helpers ────────────────────────────
+function updateStageLabels() {
+  const name = S.activeStage && S.stages[S.activeStage]
+    ? S.stages[S.activeStage].name.toUpperCase()
+    : 'NO ACTIVE STAGE';
+  ['start-stage-lbl','finish-stage-lbl'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = name;
+  });
+}
+
+function addStage() {
+  const name = document.getElementById('adm-new-stage').value.trim();
+  if (!name) return;
+  const order = Object.keys(S.stages).length;
+  db.ref(`sessions/${S.sessionCode}/stages`).push({ name, order });
+  document.getElementById('adm-new-stage').value = '';
+}
+
+function setActiveStage(id) {
+  db.ref(`sessions/${S.sessionCode}/meta/activeStageId`).set(id);
+}
+
+function renameStage(id) {
+  const cur  = S.stages[id]?.name || '';
+  const name = prompt('Rename stage:', cur);
+  if (name && name.trim()) db.ref(`sessions/${S.sessionCode}/stages/${id}/name`).set(name.trim());
+}
+
+function removeStage(id) {
+  if (!confirm('Remove stage? Timing data is kept.')) return;
+  db.ref(`sessions/${S.sessionCode}/stages/${id}`).remove();
+  if (S.activeStage === id) db.ref(`sessions/${S.sessionCode}/meta/activeStageId`).set(null);
+}
+
+function saveEventName() {
+  const v = document.getElementById('adm-event').value.trim();
+  if (!v) return;
+  db.ref(`sessions/${S.sessionCode}/meta/eventName`).set(v);
+  toast('Saved');
+}
+
+// ── Roster helpers ───────────────────────────
+function athleteName(bib) {
+  return S.roster[String(bib)]?.name || null;
+}
+
+function previewAthlete(inputId, previewId) {
+  const bib  = document.getElementById(inputId).value;
+  const el   = document.getElementById(previewId);
+  const name = athleteName(bib);
+  el.textContent = name ? `#${bib} — ${name}` : (bib ? '(Unknown athlete)' : '');
+  el.style.color = name ? 'var(--success)' : 'var(--text-3)';
+}
+
+function addAthlete() {
+  const bib  = document.getElementById('adm-new-bib').value.trim();
+  const name = document.getElementById('adm-new-name').value.trim();
+  if (!bib || !name) { toast('Enter both bib and name'); return; }
+  db.ref(`sessions/${S.sessionCode}/roster/${bib}`).set({ name, bib: String(bib) });
+  document.getElementById('adm-new-bib').value  = '';
+  document.getElementById('adm-new-name').value = '';
+  toast(`Added #${bib} ${name}`);
+}
+
+function removeAthlete(bib) {
+  if (!confirm(`Remove #${bib} ${athleteName(bib) || ''}?`)) return;
+  db.ref(`sessions/${S.sessionCode}/roster/${bib}`).remove();
+}
+
+async function importSheets() {
+  const url = document.getElementById('adm-sheets-url').value.trim();
+  if (!url) { toast('Paste a CSV URL first'); return; }
+  toast('Importing…');
+  try {
+    const res  = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    const rows = text.split('\n').slice(1); // skip header
+    const updates = {};
+    let count = 0;
+    rows.forEach(line => {
+      const cols = parseCsvLine(line);
+      const bib  = cols[0]?.trim();
+      const name = cols[1]?.trim();
+      if (bib && name && !isNaN(bib)) {
+        updates[bib] = { name, bib: String(bib) };
+        count++;
+      }
+    });
+    if (!count) { toast('No valid rows found. Check format: Bib,Name'); return; }
+    await db.ref(`sessions/${S.sessionCode}/roster`).update(updates);
+    toast(`✓ Imported ${count} athletes`);
+  } catch(e) {
+    toast('Import failed: ' + e.message);
+    console.error(e);
+  }
+}
+
+function parseCsvLine(line) {
+  const out = []; let cur = '', inq = false;
+  for (const ch of line) {
+    if (ch === '"') { inq = !inq; }
+    else if (ch === ',' && !inq) { out.push(cur); cur = ''; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+// ── Start timing ─────────────────────────────
+function recordStart() {
+  const bib = document.getElementById('start-bib').value.trim();
+  if (!bib)             { toast('Enter a bib number first');              return; }
+  if (!S.activeStage)   { toast('No active stage — set one in ⚙️ Admin'); return; }
+
+  const wasOffline = !S.isOnline;
+  const deviceTime = Date.now();
+
+  db.ref(`sessions/${S.sessionCode}/timing/${S.activeStage}/starts/${bib}`).set({
+    bib: String(bib),
+    deviceTime,
+    serverTime: firebase.database.ServerValue.TIMESTAMP,
+    wasOffline
+  });
+
+  const name  = athleteName(bib);
+  const label = name ? `#${bib} ${name}` : `#${bib}`;
+  flashScreen('green');
+  document.getElementById('start-last').textContent = `Last: ${label} at ${fmtTime(deviceTime)}${wasOffline ? ' ⚠' : ''}`;
+  document.getElementById('start-bib').value = '';
+  document.getElementById('start-preview').textContent = '';
+  document.getElementById('start-bib').focus();
+  toast(`✓ ${label} started`);
+}
+
+// ── Finish timing ────────────────────────────
+function recordFinish() {
+  if (!S.activeStage) { toast('No active stage — set one in ⚙️ Admin'); return; }
+
+  const wasOffline = !S.isOnline;
+  const deviceTime = Date.now();
+
+  db.ref(`sessions/${S.sessionCode}/timing/${S.activeStage}/finishes`).push({
+    deviceTime,
+    serverTime: firebase.database.ServerValue.TIMESTAMP,
+    wasOffline,
+    bib: null,
+    assigned: false
+  });
+
+  flashScreen('red');
+  toast(`⏱ Finish recorded — ${fmtTime(deviceTime)}`);
+  setTimeout(() => {
+    document.getElementById('finish-bib').focus();
+  }, 80);
+}
+
+function rebuildQueue() {
+  if (!S.activeStage) { S.finishQueue = []; return; }
+  const fin = S.timingData[S.activeStage]?.finishes || {};
+  S.finishQueue = Object.entries(fin)
+    .filter(([, f]) => !f.assigned)
+    .sort((a, b) => a[1].deviceTime - b[1].deviceTime)
+    .map(([id, f]) => ({ id, ...f }));
+  if (S.qIdx >= S.finishQueue.length) S.qIdx = Math.max(0, S.finishQueue.length - 1);
+}
+
+function qNav(dir) {
+  S.qIdx = Math.max(0, Math.min(S.finishQueue.length - 1, S.qIdx + dir));
+  renderQueue();
+}
+
+function renderQueue() {
+  const q = S.finishQueue;
+  document.getElementById('queue-badge').textContent   = q.length;
+  document.getElementById('finish-ua-count').textContent = `${q.length} unassigned`;
+  document.getElementById('queue-empty').style.display    = q.length === 0 ? 'block' : 'none';
+  document.getElementById('queue-controls').style.display = q.length  > 0 ? 'block' : 'none';
+  if (!q.length) return;
+
+  const e    = q[S.qIdx];
+  const useT = e.wasOffline ? e.deviceTime : (e.serverTime || e.deviceTime);
+  const tEl  = document.getElementById('q-time');
+  tEl.textContent = fmtTime(useT) + (e.wasOffline ? '  ⚠' : '');
+  tEl.className   = 'queue-entry-time' + (e.wasOffline ? ' device-time' : '');
+  document.getElementById('q-meta').textContent   = `entry ${S.qIdx + 1} of ${q.length}`;
+  document.getElementById('q-prev').disabled      = S.qIdx === 0;
+  document.getElementById('q-next').disabled      = S.qIdx === q.length - 1;
+}
+
+function assignFinish() {
+  const bib = document.getElementById('finish-bib').value.trim();
+  if (!bib)               { toast('Enter a bib number'); return; }
+  if (!S.finishQueue.length) { toast('No unassigned entries'); return; }
+
+  const entry = S.finishQueue[S.qIdx];
+  db.ref(`sessions/${S.sessionCode}/timing/${S.activeStage}/finishes/${entry.id}`).update({
+    bib: String(bib),
+    assigned: true
+  });
+
+  const name  = athleteName(bib);
+  const label = name ? `#${bib} ${name}` : `#${bib}`;
+  toast(`✓ Time assigned to ${label}`);
+  document.getElementById('finish-bib').value    = '';
+  document.getElementById('finish-preview').textContent = '';
+}
+
+// ── Results rendering ────────────────────────
+let activeTab = 'overall';
+
+function renderResultsTabs() {
+  const el = document.getElementById('res-tabs');
+  if (!el) return;
+  const sorted = sortedStages();
+  let html = `<button class="tab-btn ${activeTab==='overall'?'active':''}" onclick="switchTab('overall')">OVERALL</button>`;
+  sorted.forEach(([id, s]) => {
+    html += `<button class="tab-btn ${activeTab===id?'active':''}" onclick="switchTab('${id}')">${esc(s.name.toUpperCase())}</button>`;
+  });
+  el.innerHTML = html;
+}
+
+function switchTab(t) { activeTab = t; renderResultsTabs(); renderResults(); }
+
+function sortedStages() {
+  return Object.entries(S.stages).sort((a,b) => (a[1].order||0) - (b[1].order||0));
+}
+
+function renderResults() {
+  const el = document.getElementById('res-body');
+  if (!el) return;
+  if (activeTab === 'overall') renderOverall(el);
+  else renderStage(el, activeTab);
+}
+
+function getElapsed(bib, sid) {
+  const td  = S.timingData[sid];
+  if (!td) return null;
+  const st  = td.starts[String(bib)];
+  if (!st)  return null;
+  const fin = Object.values(td.finishes).find(f => f.assigned && String(f.bib) === String(bib));
+  if (!fin) return null;
+
+  const sT  = st.wasOffline  ? st.deviceTime  : (st.serverTime  || st.deviceTime);
+  const fT  = fin.wasOffline ? fin.deviceTime : (fin.serverTime || fin.deviceTime);
+  return { ms: fT - sT, offline: st.wasOffline || fin.wasOffline };
+}
+
+function renderOverall(el) {
+  const stages = sortedStages();
+  const bibs   = allBibs();
+  const unassigned = collectUnassigned();
+
+  if (!bibs.size && !unassigned.length) {
+    el.innerHTML = '<div class="no-data">No timing data yet.<br>Start a stage and begin recording times.</div>';
+    return;
+  }
+
+  const rows = [];
+  bibs.forEach(bib => {
+    const name = athleteName(bib) || '(Unknown)';
+    let total = 0, complete = true, anyOffline = false;
+    const times = {};
+    stages.forEach(([sid]) => {
+      const r = getElapsed(bib, sid);
+      if (r) { times[sid] = r; total += r.ms; if (r.offline) anyOffline = true; }
+      else { complete = false; times[sid] = null; }
+    });
+    rows.push({ bib, name, total, complete, anyOffline, times });
+  });
+  rows.sort((a,b) => {
+    if (a.complete !== b.complete) return a.complete ? -1 : 1;
+    return a.total - b.total;
+  });
+
+  let h = '<table class="results-table"><thead><tr>';
+  h += '<th>#</th><th>BIB</th><th>NAME</th>';
+  stages.forEach(([,s]) => h += `<th>${esc(s.name.toUpperCase())}</th>`);
+  h += '<th>OVERALL</th></tr></thead><tbody>';
+
+  let rank = 1;
+  rows.forEach(r => {
+    h += '<tr>';
+    h += `<td class="td-rank">${r.complete ? rank++ : '—'}</td>`;
+    h += `<td class="td-bib">${r.bib}</td>`;
+    h += `<td class="td-name">${esc(r.name)}</td>`;
+    stages.forEach(([sid]) => {
+      const t = r.times[sid];
+      if (t) {
+        h += `<td class="td-time ${t.offline?'td-warn':''}">${fmtElapsed(t.ms)}${t.offline?' ⚠':''}</td>`;
+      } else {
+        const running = S.timingData[sid]?.starts[r.bib];
+        h += `<td class="td-muted">${running ? 'Running…' : '—'}</td>`;
+      }
+    });
+    h += `<td class="${r.complete?'td-best':'td-muted'}">${r.complete ? fmtElapsed(r.total)+(r.anyOffline?' ⚠':'') : (stages.length ? '(incomplete)' : '—')}</td>`;
+    h += '</tr>';
+  });
+
+  unassigned.forEach(u => {
+    h += `<tr><td class="td-rank">—</td><td class="td-danger">?</td><td class="td-danger">Unassigned</td>`;
+    stages.forEach(([sid]) => h += sid===u.sid ? `<td class="td-danger">${fmtTime(u.t)}</td>` : '<td class="td-muted">—</td>');
+    h += '<td class="td-muted">—</td></tr>';
+  });
+
+  h += '</tbody></table>';
+  el.innerHTML = h;
+}
+
+function renderStage(el, sid) {
+  const td = S.timingData[sid] || { starts:{}, finishes:{} };
+  const bibs = new Set([
+    ...Object.keys(td.starts),
+    ...Object.values(td.finishes).filter(f=>f.assigned&&f.bib).map(f=>String(f.bib))
+  ]);
+  const unassigned = Object.entries(td.finishes).filter(([,f])=>!f.assigned);
+
+  if (!bibs.size && !unassigned.length) {
+    el.innerHTML = '<div class="no-data">No data for this stage yet.</div>';
+    return;
+  }
+
+  const rows = [];
+  bibs.forEach(bib => {
+    const name   = athleteName(bib) || '(Unknown)';
+    const result = getElapsed(bib, sid);
+    const st     = td.starts[bib];
+    rows.push({ bib, name, result, st });
+  });
+  rows.sort((a,b) => {
+    if (a.result && !b.result) return -1;
+    if (!a.result && b.result) return 1;
+    if (a.result && b.result)  return a.result.ms - b.result.ms;
+    return 0;
+  });
+
+  let h = '<table class="results-table"><thead><tr><th>#</th><th>BIB</th><th>NAME</th><th>START</th><th>FINISH</th><th>TIME</th></tr></thead><tbody>';
+  let rank = 1;
+  rows.forEach(r => {
+    const fin  = Object.values(td.finishes).find(f=>f.assigned&&String(f.bib)===String(r.bib));
+    const stT  = r.st  ? (r.st.wasOffline  ? r.st.deviceTime  : (r.st.serverTime  || r.st.deviceTime))  : null;
+    const finT = fin   ? (fin.wasOffline ? fin.deviceTime : (fin.serverTime || fin.deviceTime)) : null;
+
+    h += '<tr>';
+    h += `<td class="td-rank">${r.result ? rank++ : '—'}</td>`;
+    h += `<td class="td-bib">${r.bib}</td>`;
+    h += `<td class="td-name">${esc(r.name)}</td>`;
+    h += `<td class="td-time ${r.st?.wasOffline?'td-warn':''}">${stT ? fmtTime(stT)+(r.st.wasOffline?' ⚠':'') : '—'}</td>`;
+    h += `<td class="td-time ${fin?.wasOffline?'td-warn':''}">${finT ? fmtTime(finT)+(fin.wasOffline?' ⚠':'') : (r.st ? 'Running…' : '—')}</td>`;
+    h += `<td class="${r.result?'td-best':'td-muted'}">${r.result ? fmtElapsed(r.result.ms)+(r.result.offline?' ⚠':'') : '—'}</td>`;
+    h += '</tr>';
+  });
+
+  unassigned.forEach(([id,f]) => {
+    const t = f.wasOffline ? f.deviceTime : (f.serverTime || f.deviceTime);
+    h += `<tr><td>—</td><td class="td-danger">?</td><td class="td-danger">Unassigned finish</td><td>—</td><td class="td-danger">${fmtTime(t)}</td><td>—</td></tr>`;
+  });
+
+  h += '</tbody></table>';
+  el.innerHTML = h;
+}
+
+function allBibs() {
+  const set = new Set();
+  Object.keys(S.roster).forEach(b => set.add(b));
+  Object.values(S.timingData).forEach(td => {
+    Object.keys(td.starts).forEach(b => set.add(b));
+    Object.values(td.finishes).filter(f=>f.assigned&&f.bib).forEach(f=>set.add(String(f.bib)));
+  });
+  return set;
+}
+
+function collectUnassigned() {
+  const out = [];
+  Object.entries(S.timingData).forEach(([sid, td]) => {
+    Object.entries(td.finishes).filter(([,f])=>!f.assigned).forEach(([id,f]) => {
+      const t = f.wasOffline ? f.deviceTime : (f.serverTime || f.deviceTime);
+      out.push({ sid, id, t, offline: f.wasOffline });
+    });
+  });
+  return out;
+}
+
+// ── Admin panel ──────────────────────────────
+function openAdmin() {
+  document.getElementById('admin-panel').classList.add('open');
+  document.getElementById('adm-code').textContent = S.sessionCode;
+  document.getElementById('adm-event').value      = S.eventName;
+  renderAdminStages();
+  renderAdminRoster();
+  genQR();
+}
+function closeAdmin() {
+  document.getElementById('admin-panel').classList.remove('open');
+}
+
+function renderAdminStages() {
+  const el = document.getElementById('adm-stages');
+  if (!el) return;
+  const sorted = sortedStages();
+  if (!sorted.length) { el.innerHTML = '<div class="hint" style="margin-bottom:10px;">No stages added yet.</div>'; return; }
+  el.innerHTML = sorted.map(([id,s]) => {
+    const act = id === S.activeStage;
+    return `<div class="stage-item ${act?'is-active':''}">
+      <div class="stage-dot ${act?'on':''}"></div>
+      <div class="stage-item-name">${esc(s.name)}</div>
+      ${act
+        ? '<span class="active-badge">● ACTIVE</span>'
+        : `<button class="xs-btn ok" onclick="setActiveStage('${id}')">Set Active</button>`}
+      <button class="xs-btn" onclick="renameStage('${id}')">Rename</button>
+      <button class="xs-btn del" onclick="removeStage('${id}')">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function renderAdminRoster() {
+  const el = document.getElementById('adm-roster');
+  if (!el) return;
+  const entries = Object.entries(S.roster).sort((a,b) => Number(a[0]) - Number(b[0]));
+  if (!entries.length) { el.innerHTML = '<div class="hint">No athletes yet.</div>'; return; }
+  el.innerHTML = entries.map(([bib,a]) =>
+    `<div class="athlete-row"><div><span class="ath-bib">#${bib}</span>${esc(a.name)}</div>
+     <button class="xs-btn del" onclick="removeAthlete('${bib}')">✕</button></div>`
+  ).join('');
+}
+
+// ── Share / QR ───────────────────────────────
+function shareURL() {
+  return `${location.href.split('?')[0]}?session=${S.sessionCode}&role=viewer`;
+}
+
+function genQR() {
+  const wrap = document.getElementById('qr-inner');
+  wrap.innerHTML = '';
+  const url = shareURL();
+  document.getElementById('share-url-display').textContent = url;
+  try {
+    new QRCode(wrap, { text: url, width: 150, height: 150,
+      colorDark: '#000', colorLight: '#fff', correctLevel: QRCode.CorrectLevel.M });
+  } catch(e) {
+    wrap.innerHTML = '<div class="hint">QR unavailable offline</div>';
+  }
+}
+
+function copyLink() {
+  navigator.clipboard.writeText(shareURL()).then(() => toast('✓ Link copied'));
+}
+
+function shareWA() {
+  const msg = encodeURIComponent(`🏁 *${S.eventName}* — Live Results\n\nWatch your time live:\n${shareURL()}\n\nSession code: *${S.sessionCode}*`);
+  window.open(`https://wa.me/?text=${msg}`, '_blank');
+}
+
+// ── Formatting ───────────────────────────────
+function fmtTime(ms) {
+  if (!ms) return '--:--:--.---';
+  const d = new Date(ms);
+  return d.toTimeString().slice(0,8) + '.' + String(d.getMilliseconds()).padStart(3,'0');
+}
+
+function fmtElapsed(ms) {
+  if (ms == null || ms < 0) return '--:--.---';
+  const m  = Math.floor(ms / 60000);
+  const s  = Math.floor((ms % 60000) / 1000);
+  const ml = ms % 1000;
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(ml).padStart(3,'0')}`;
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Flash / Toast ────────────────────────────
+function flashScreen(colour) {
+  const el = document.getElementById(`fl-${colour}`);
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 350);
+}
+
+let _toastTmr;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(_toastTmr);
+  _toastTmr = setTimeout(() => el.classList.remove('show'), 2600);
+}
+</script>
+</body>
+</html>
