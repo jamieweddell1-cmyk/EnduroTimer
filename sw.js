@@ -1,4 +1,4 @@
-const CACHE = 'endurotimer-v2';
+const CACHE = 'endurotimer-v3';
 
 const PRECACHE = [
   '/',
