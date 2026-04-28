@@ -525,7 +525,7 @@ const firebaseConfig = {
 window.addEventListener('load', () => {
   try {
     if (firebase.apps.length) firebase.apps.forEach(a => a.delete());
-    firebase.initializeApp(EMBEDDED_CONFIG);
+    firebase.initializeApp(firebaseConfig);
     db = firebase.database();
     db.ref('.info/connected').on('value', s => setOnline(s.val() === true));
     checkURLParams();
