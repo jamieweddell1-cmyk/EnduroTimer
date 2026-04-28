@@ -150,7 +150,11 @@ input[type="number"]::-webkit-inner-spin-button,input[type="number"]::-webkit-ou
 .nav-arrow:active:not(:disabled){background:var(--surface-3)}
 .queue-entry-card{flex:1;background:var(--surface-2);border:1.5px solid var(--accent);border-radius:10px;padding:10px 14px;text-align:center}
 .queue-entry-time{font-family:var(--mono);font-size:19px;font-weight:500;color:var(--text);line-height:1}
-.queue-entry-time.device-time{color:var(--accent)}
+
+/* STAGE SELECTOR BAR */
+.stage-selector-bar{background:var(--surface-2);border-bottom:1px solid var(--border);padding:8px 12px;flex-shrink:0;display:flex;align-items:center;gap:10px}
+.stage-selector-bar label{margin:0;font-size:10px;letter-spacing:.14em;color:var(--text-3);white-space:nowrap;text-transform:uppercase;font-family:var(--mono)}
+.stage-selector-bar select{flex:1;font-size:14px;padding:8px 32px 8px 12px;border-radius:8px;background:var(--surface-3);border-color:var(--accent);color:var(--accent);font-weight:600}
 .queue-entry-meta{font-family:var(--mono);font-size:11px;color:var(--text-3);margin-top:3px}
 .assign-row{display:flex;gap:9px;align-items:center}
 .assign-bib{width:110px!important;flex-shrink:0;text-align:center!important;font-size:24px!important;font-weight:700!important;letter-spacing:3px;padding:12px 10px!important;color:var(--accent)!important}
@@ -317,6 +321,12 @@ input[type="number"]::-webkit-inner-spin-button,input[type="number"]::-webkit-ou
     </div>
   </div>
   <div class="offline-banner" id="start-banner">📡 OFFLINE — USING DEVICE TIME</div>
+  <div class="stage-selector-bar">
+    <label>Stage</label>
+    <select id="start-stage-select" onchange="setLocalStage(this.value)">
+      <option value="">— No stages yet —</option>
+    </select>
+  </div>
   <div class="timing-body">
     <div>
       <label style="text-align:center">BIB NUMBER</label>
@@ -347,6 +357,12 @@ input[type="number"]::-webkit-inner-spin-button,input[type="number"]::-webkit-ou
     </div>
   </div>
   <div class="offline-banner" id="finish-banner">📡 OFFLINE — USING DEVICE TIME</div>
+  <div class="stage-selector-bar">
+    <label>Stage</label>
+    <select id="finish-stage-select" onchange="setLocalStage(this.value)">
+      <option value="">— No stages yet —</option>
+    </select>
+  </div>
 
   <div class="finish-body">
     <button class="action-btn btn-stop" onclick="recordFinish()">FINISH</button>
@@ -537,13 +553,14 @@ const S = {
   sessionCode : null,
   eventName   : '',
   role        : null,
-  isViewerOnly: false,   // true = arrived via shared URL, no back nav
-  days        : {},      // { dayId: {name, order} }
-  stages      : {},      // { stageId: {name, order, dayId} }
+  isViewerOnly: false,
+  days        : {},
+  stages      : {},
   activeStage : null,
+  localStage  : null,  // locally selected stage — works offline
   roster      : {},
   isOnline    : true,
-  timingData  : {},      // { stageId: {starts:{}, finishes:{}} }
+  timingData  : {},
   finishQueue : [],
   qIdx        : 0,
   listeners   : []
@@ -612,7 +629,7 @@ async function createSession() {
   }
 
   await db.ref(`sessions/${code}`).set({
-    meta: { eventName, createdAt: firebase.database.ServerValue.TIMESTAMP, activeStageId: null },
+    meta: { eventName, createdAt: Date.now(), activeStageId: null },
     days: Object.keys(daysObj).length ? daysObj : null
   });
 
@@ -656,14 +673,15 @@ function selectRole(role) {
   if (role === 'start') {
     document.getElementById('start-event-lbl').textContent = S.eventName;
     document.getElementById('start-bib').value = '';
-    // Show back arrow for officials
     document.getElementById('start-back-btn').classList.toggle('hidden', S.isViewerOnly);
     showScreen('screen-start');
+    renderStageSelectors();
     setTimeout(() => document.getElementById('start-bib').focus(), 200);
   } else if (role === 'finish') {
     document.getElementById('finish-event-lbl').textContent = S.eventName;
     document.getElementById('finish-back-btn').classList.toggle('hidden', S.isViewerOnly);
     showScreen('screen-finish');
+    renderStageSelectors();
     renderQueue();
   } else {
     document.getElementById('res-session-lbl').textContent = `SESSION ${S.sessionCode}`;
@@ -680,7 +698,7 @@ function leaveSession() {
   detach();
   Object.assign(S, {
     sessionCode:null, eventName:'', role:null, isViewerOnly:false,
-    days:{}, stages:{}, activeStage:null, roster:{},
+    days:{}, stages:{}, activeStage:null, localStage:null, roster:{},
     timingData:{}, finishQueue:[], qIdx:0, listeners:[]
   });
   closeAdmin();
@@ -693,6 +711,9 @@ function listenMeta() {
     const m = snap.val() || {};
     S.eventName   = m.eventName || 'EnduroTimer';
     S.activeStage = m.activeStageId || null;
+    // Only update localStage from Firebase if official hasn't manually overridden it
+    if (S.activeStage && !S.localStage) S.localStage = S.activeStage;
+    if (S.activeStage && S.localStage === null) S.localStage = S.activeStage;
     ['start-event-lbl','finish-event-lbl','res-event-lbl'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.textContent = S.eventName;
@@ -716,6 +737,7 @@ function listenMeta() {
   listen(db.ref(`sessions/${S.sessionCode}/stages`), 'value', snap => {
     S.stages = snap.val() || {};
     updateStageLabels();
+    renderStageSelectors();
     renderAdminStages();
     renderDaySelect();
     renderResultsTabs();
@@ -762,9 +784,11 @@ function stagesNoDay() {
 }
 
 function updateStageLabels() {
-  let label = 'NO ACTIVE STAGE';
-  if (S.activeStage && S.stages[S.activeStage]) {
-    const stage = S.stages[S.activeStage];
+  // Top bar shows locally selected stage
+  const sid = S.localStage || S.activeStage;
+  let label = 'SELECT A STAGE ABOVE';
+  if (sid && S.stages[sid]) {
+    const stage = S.stages[sid];
     const day   = stage.dayId && S.days[stage.dayId] ? S.days[stage.dayId].name + ' · ' : '';
     label = (day + stage.name).toUpperCase();
   }
@@ -772,6 +796,31 @@ function updateStageLabels() {
     const el = document.getElementById(id);
     if (el) el.textContent = label;
   });
+}
+
+function renderStageSelectors() {
+  const sorted = sortedStages();
+  const opts = sorted.length
+    ? sorted.map(([id,s]) => {
+        const day = s.dayId && S.days[s.dayId] ? S.days[s.dayId].name + ' · ' : '';
+        const sel = id === S.localStage ? ' selected' : '';
+        return `<option value="${id}"${sel}>${esc(day + s.name)}</option>`;
+      }).join('')
+    : '<option value="">— No stages yet —</option>';
+
+  ['start-stage-select','finish-stage-select'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = opts;
+  });
+  updateStageLabels();
+}
+
+function setLocalStage(id) {
+  S.localStage = id || null;
+  updateStageLabels();
+  rebuildQueue();
+  renderQueue();
+  renderOnCourse();
 }
 
 function addDay() {
@@ -895,9 +944,10 @@ function parseCsvLine(line) {
 function renderOnCourse() {
   const panel = document.getElementById('on-course-panel');
   const list  = document.getElementById('on-course-list');
-  if (!panel || !S.activeStage) { if(panel) panel.style.display='none'; return; }
+  const sid   = S.localStage;
+  if (!panel || !sid) { if(panel) panel.style.display='none'; return; }
 
-  const td = S.timingData[S.activeStage] || { starts:{}, finishes:{} };
+  const td = S.timingData[sid] || { starts:{}, finishes:{} };
   const finishedBibs = new Set(
     Object.values(td.finishes).filter(f=>f.assigned&&f.bib).map(f=>String(f.bib))
   );
@@ -920,24 +970,20 @@ function renderOnCourse() {
 // ── Start timing ──────────────────────────
 function recordStart() {
   const bib = document.getElementById('start-bib').value.trim();
-  if (!bib)           { toast('Enter a bib number first'); return; }
-  if (!S.activeStage) { toast('No active stage — set one in ⚙️ Admin'); return; }
+  if (!bib)            { toast('Enter a bib number first'); return; }
+  if (!S.localStage)   { toast('Select a stage above first'); return; }
 
-  const wasOffline = !S.isOnline;
   const deviceTime = Date.now();
 
-  db.ref(`sessions/${S.sessionCode}/timing/${S.activeStage}/starts/${bib}`).set({
+  db.ref(`sessions/${S.sessionCode}/timing/${S.localStage}/starts/${bib}`).set({
     bib: String(bib),
-    deviceTime,
-    serverTime: firebase.database.ServerValue.TIMESTAMP,
-    wasOffline
+    deviceTime
   });
 
   const name  = athleteName(bib);
   const label = name ? `#${bib} ${name}` : `#${bib}`;
   flashScreen('green');
-  document.getElementById('start-last').textContent =
-    `Last: ${label} at ${fmtTime(deviceTime)}${wasOffline?' ⚠':''}`;
+  document.getElementById('start-last').textContent = `Last: ${label} at ${fmtTime(deviceTime)}`;
   document.getElementById('start-bib').value = '';
   document.getElementById('start-preview').textContent = '';
   document.getElementById('start-bib').focus();
@@ -946,15 +992,12 @@ function recordStart() {
 
 // ── Finish timing ─────────────────────────
 function recordFinish() {
-  if (!S.activeStage) { toast('No active stage — set one in ⚙️ Admin'); return; }
+  if (!S.localStage) { toast('Select a stage above first'); return; }
 
-  const wasOffline = !S.isOnline;
   const deviceTime = Date.now();
 
-  db.ref(`sessions/${S.sessionCode}/timing/${S.activeStage}/finishes`).push({
+  db.ref(`sessions/${S.sessionCode}/timing/${S.localStage}/finishes`).push({
     deviceTime,
-    serverTime: firebase.database.ServerValue.TIMESTAMP,
-    wasOffline,
     bib: null,
     assigned: false
   });
@@ -965,8 +1008,8 @@ function recordFinish() {
 }
 
 function rebuildQueue() {
-  if (!S.activeStage) { S.finishQueue = []; return; }
-  const fin = S.timingData[S.activeStage]?.finishes || {};
+  if (!S.localStage) { S.finishQueue = []; return; }
+  const fin = S.timingData[S.localStage]?.finishes || {};
   S.finishQueue = Object.entries(fin)
     .filter(([,f]) => !f.assigned)
     .sort((a,b) => a[1].deviceTime - b[1].deviceTime)
@@ -981,17 +1024,16 @@ function qNav(dir) {
 
 function renderQueue() {
   const q = S.finishQueue;
-  document.getElementById('queue-badge').textContent    = q.length;
+  document.getElementById('queue-badge').textContent     = q.length;
   document.getElementById('finish-ua-count').textContent = `${q.length} unassigned`;
   document.getElementById('queue-empty').style.display    = q.length===0 ? 'block' : 'none';
   document.getElementById('queue-controls').style.display = q.length >0  ? 'block' : 'none';
   if (!q.length) return;
 
-  const e   = q[S.qIdx];
-  const useT = e.wasOffline ? e.deviceTime : (e.serverTime || e.deviceTime);
-  const tEl  = document.getElementById('q-time');
-  tEl.textContent = fmtTime(useT) + (e.wasOffline ? '  ⚠' : '');
-  tEl.className   = 'queue-entry-time' + (e.wasOffline ? ' device-time' : '');
+  const e = q[S.qIdx];
+  const tEl = document.getElementById('q-time');
+  tEl.textContent = fmtTime(e.deviceTime);
+  tEl.className   = 'queue-entry-time';
   document.getElementById('q-meta').textContent = `entry ${S.qIdx+1} of ${q.length}`;
   document.getElementById('q-prev').disabled    = S.qIdx === 0;
   document.getElementById('q-next').disabled    = S.qIdx === q.length-1;
@@ -1003,7 +1045,7 @@ function assignFinish() {
   if (!S.finishQueue.length){ toast('No unassigned entries'); return; }
 
   const entry = S.finishQueue[S.qIdx];
-  db.ref(`sessions/${S.sessionCode}/timing/${S.activeStage}/finishes/${entry.id}`).update({
+  db.ref(`sessions/${S.sessionCode}/timing/${S.localStage}/finishes/${entry.id}`).update({
     bib: String(bib), assigned: true
   });
 
@@ -1067,34 +1109,33 @@ function renderOverall(el) {
   const rows = [];
   bibs.forEach(bib => {
     const name = athleteName(bib) || '(Unknown)';
-    let total = 0, complete = true, anyOffline = false;
+    let total = 0, complete = true;
     const colTimes = {};
 
     if (useDays) {
       days.forEach(([did]) => {
         const dStages = stagesForDay(did);
-        let dayTotal = 0, dayComplete = true, dayOffline = false;
+        let dayTotal = 0, dayComplete = true;
         dStages.forEach(([sid]) => {
           const r = getElapsed(bib, sid);
-          if (r) { dayTotal += r.ms; if(r.offline) dayOffline=true; }
+          if (r) { dayTotal += r.ms; }
           else   { dayComplete = false; }
         });
         if (!dStages.length) { dayComplete = false; }
-        colTimes[did] = dayComplete ? {ms:dayTotal, offline:dayOffline} : null;
+        colTimes[did] = dayComplete ? {ms:dayTotal} : null;
         if (!dayComplete) complete = false;
         else total += dayTotal;
-        if (dayOffline) anyOffline = true;
       });
     } else {
       stages.forEach(([sid]) => {
         const r = getElapsed(bib, sid);
         colTimes[sid] = r;
-        if (r) { total += r.ms; if(r.offline) anyOffline=true; }
+        if (r) { total += r.ms; }
         else   { complete = false; }
       });
     }
 
-    rows.push({ bib, name, total, complete, anyOffline, colTimes });
+    rows.push({ bib, name, total, complete, colTimes });
   });
 
   rows.sort((a,b) => {
@@ -1115,10 +1156,10 @@ function renderOverall(el) {
     h += `<td class="td-name">${esc(r.name)}</td>`;
     cols.forEach(([id]) => {
       const t = r.colTimes[id];
-      if (t) h += `<td class="td-time${t.offline?' td-warn':''}">${fmtElapsed(t.ms)}${t.offline?' ⚠':''}</td>`;
+      if (t) h += `<td class="td-time">${fmtElapsed(t.ms)}</td>`;
       else   h += `<td class="td-muted">—</td>`;
     });
-    h += `<td class="${r.complete?'td-best':'td-muted'}">${r.complete ? fmtElapsed(r.total)+(r.anyOffline?' ⚠':'') : '—'}</td>`;
+    h += `<td class="${r.complete?'td-best':'td-muted'}">${r.complete ? fmtElapsed(r.total) : '—'}</td>`;
     h += '</tr>';
   });
 
@@ -1152,23 +1193,22 @@ function renderDayTab(el, dayId) {
   stages.forEach(([sid]) => {
     const td = S.timingData[sid] || { starts:{}, finishes:{} };
     Object.entries(td.finishes).filter(([,f])=>!f.assigned).forEach(([id,f])=>{
-      const t = f.wasOffline ? f.deviceTime : (f.serverTime||f.deviceTime);
-      ua.push({sid,id,t,offline:f.wasOffline});
+      ua.push({sid, id, t: f.deviceTime});
     });
   });
 
   const rows = [];
   bibs.forEach(bib => {
     const name = athleteName(bib) || '(Unknown)';
-    let dayTotal = 0, dayComplete = true, anyOffline = false;
+    let dayTotal = 0, dayComplete = true;
     const stageTimes = {};
     stages.forEach(([sid]) => {
       const r = getElapsed(bib, sid);
       stageTimes[sid] = r;
-      if (r) { dayTotal += r.ms; if(r.offline) anyOffline=true; }
+      if (r) { dayTotal += r.ms; }
       else   { dayComplete = false; }
     });
-    rows.push({ bib, name, dayTotal, dayComplete, anyOffline, stageTimes });
+    rows.push({ bib, name, dayTotal, dayComplete, stageTimes });
   });
 
   rows.sort((a,b) => {
@@ -1189,11 +1229,11 @@ function renderDayTab(el, dayId) {
     stages.forEach(([sid]) => {
       const t  = r.stageTimes[sid];
       const td = S.timingData[sid] || {starts:{}};
-      if (t)  h += `<td class="td-time${t.offline?' td-warn':''}">${fmtElapsed(t.ms)}${t.offline?' ⚠':''}</td>`;
+      if (t)  h += `<td class="td-time">${fmtElapsed(t.ms)}</td>`;
       else if (td.starts[r.bib]) h += `<td class="td-muted">Running…</td>`;
       else    h += `<td class="td-muted">—</td>`;
     });
-    h += `<td class="${r.dayComplete?'td-best':'td-muted'}">${r.dayComplete ? fmtElapsed(r.dayTotal)+(r.anyOffline?' ⚠':'') : '—'}</td>`;
+    h += `<td class="${r.dayComplete?'td-best':'td-muted'}">${r.dayComplete ? fmtElapsed(r.dayTotal) : '—'}</td>`;
     h += '</tr>';
   });
 
@@ -1240,20 +1280,19 @@ function renderStageTab(el, sid) {
   let rank = 1;
   rows.forEach(r => {
     const fin  = Object.values(td.finishes).find(f=>f.assigned&&String(f.bib)===String(r.bib));
-    const stT  = r.st  ? (r.st.wasOffline  ? r.st.deviceTime  : (r.st.serverTime ||r.st.deviceTime))  : null;
-    const finT = fin   ? (fin.wasOffline ? fin.deviceTime : (fin.serverTime||fin.deviceTime)) : null;
+    const stT  = r.st  ? r.st.deviceTime  : null;
+    const finT = fin   ? fin.deviceTime   : null;
     h += '<tr>';
     h += `<td class="td-rank">${r.result ? rank++ : '—'}</td>`;
     h += `<td class="td-bib">${r.bib}</td>`;
     h += `<td class="td-name">${esc(r.name)}</td>`;
-    h += `<td class="td-time${r.st?.wasOffline?' td-warn':''}">${stT ? fmtTime(stT)+(r.st.wasOffline?' ⚠':'') : '—'}</td>`;
-    h += `<td class="td-time${fin?.wasOffline?' td-warn':''}">${finT ? fmtTime(finT)+(fin.wasOffline?' ⚠':'') : (r.st ? 'Running…' : '—')}</td>`;
-    h += `<td class="${r.result?'td-best':'td-muted'}">${r.result ? fmtElapsed(r.result.ms)+(r.result.offline?' ⚠':'') : '—'}</td>`;
+    h += `<td class="td-time">${stT ? fmtTime(stT) : '—'}</td>`;
+    h += `<td class="td-time">${finT ? fmtTime(finT) : (r.st ? 'Running…' : '—')}</td>`;
+    h += `<td class="${r.result?'td-best':'td-muted'}">${r.result ? fmtElapsed(r.result.ms) : '—'}</td>`;
     h += '</tr>';
   });
   ua.forEach(([id,f]) => {
-    const t = f.wasOffline ? f.deviceTime : (f.serverTime||f.deviceTime);
-    h += `<tr><td>—</td><td class="td-danger">?</td><td class="td-danger">Unassigned finish</td><td>—</td><td class="td-danger">${fmtTime(t)}</td><td>—</td></tr>`;
+    h += `<tr><td>—</td><td class="td-danger">?</td><td class="td-danger">Unassigned finish</td><td>—</td><td class="td-danger">${fmtTime(f.deviceTime)}</td><td>—</td></tr>`;
   });
   h += '</tbody></table>';
   el.innerHTML = h;
@@ -1266,9 +1305,7 @@ function getElapsed(bib, sid) {
   if (!st)  return null;
   const fin = Object.values(td.finishes).find(f => f.assigned && String(f.bib) === String(bib));
   if (!fin) return null;
-  const sT  = st.deviceTime;
-  const fT  = fin.deviceTime;
-  return { ms: fT-sT, offline: st.wasOffline || fin.wasOffline };
+  return { ms: fin.deviceTime - st.deviceTime };
 }
 
 function allBibs() {
@@ -1285,8 +1322,7 @@ function collectUnassigned() {
   const out = [];
   Object.entries(S.timingData).forEach(([sid,td]) => {
     Object.entries(td.finishes).filter(([,f])=>!f.assigned).forEach(([id,f]) => {
-      const t = f.wasOffline ? f.deviceTime : (f.serverTime||f.deviceTime);
-      out.push({sid,id,t,offline:f.wasOffline});
+      out.push({sid, id, t: f.deviceTime});
     });
   });
   return out;
