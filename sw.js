@@ -1,5 +1,5 @@
 const CACHE = 'endurotimer-v3';
-
+const TEST = 'gg';
 const PRECACHE = [
   '/',
   '/index.html',
