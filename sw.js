@@ -1,5 +1,5 @@
 // Version Bump
-const CACHE = 'endurotimer-v6';
+const CACHE = 'endurotimer-v7';
 const PRECACHE = [
   '/',
   '/index.html',
