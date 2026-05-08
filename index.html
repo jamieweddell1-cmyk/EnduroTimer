@@ -1099,16 +1099,6 @@ function recordStart() {
   toast(`✓ ${label} started`);
 }
 
-  const name  = athleteName(bib);
-  const label = name ? `#${bib} ${name}` : `#${bib}`;
-  flashScreen('green');
-  document.getElementById('start-last').textContent = `Last: ${label} at ${fmtTime(deviceTime)}`;
-  document.getElementById('start-bib').value = '';
-  document.getElementById('start-preview').textContent = '';
-  document.getElementById('start-bib').focus();
-  toast(`✓ ${label} started`);
-}
-
 // ── Finish timing ─────────────────────────
 function recordFinish() {
 
